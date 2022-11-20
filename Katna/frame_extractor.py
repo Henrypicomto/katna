@@ -137,7 +137,8 @@ class FrameExtractor(object):
         del sm_diff_array
         del diff_array
         del frame_diffs[:]
-        return extracted_key_frames
+
+        return extracted_key_frames, frame_indexes
 
     def __smooth__(self, x, window_len, window=config.FrameExtractor.window_type):
         """smooth the data using a window with requested size.
@@ -200,6 +201,7 @@ class FrameExtractor(object):
         """
 
         extracted_candidate_key_frames = []
+        extracted_candidate_key_frames_indexes = []
 
         # Get all frames from video in chunks using python Generators
         frame_extractor_from_video_generator = self.__extract_all_frames_from_video__(
@@ -207,17 +209,20 @@ class FrameExtractor(object):
         )
 
         # Loop over every frame in the frame extractor generator object and calculate the
-        # local maxima of frames 
+        # local maxima of frames
         for frames, frame_diffs in frame_extractor_from_video_generator:
             extracted_candidate_key_frames_chunk = []
             if self.USE_LOCAL_MAXIMA:
 
                 # Getting the frame with maximum frame difference
-                extracted_candidate_key_frames_chunk = self.__get_frames_in_local_maxima__(
+                extracted_candidate_key_frames_chunk, extracted_candidate_key_frames_index_chunk = self.__get_frames_in_local_maxima__(
                     frames, frame_diffs
                 )
                 extracted_candidate_key_frames.extend(
                     extracted_candidate_key_frames_chunk
                 )
+                extracted_candidate_key_frames_indexes.extend(
+                    extracted_candidate_key_frames_index_chunk
+                )
 
-        return extracted_candidate_key_frames
+        return extracted_candidate_key_frames, extracted_candidate_key_frames_indexes

@@ -140,11 +140,15 @@ class ImageSelector(object):
 
         # Returning only those images which are have good brightness and contrast score
 
-        return [
+        return ([
             input_img_files[i]
             for i in range(n_files)
             if brightness_ok[i] and contrast_ok[i]
-        ]
+        ], [
+            i
+            for i in range(n_files)
+            if brightness_ok[i] and contrast_ok[i]
+        ])
 
     def __prepare_cluster_sets__(self, files):
         """ Internal function for clustering input image files, returns array of indexs of each input file
@@ -265,6 +269,8 @@ class ImageSelector(object):
 
         filtered_key_frames = []
         filtered_images_list = []
+        filtered_images_frame_index_list = []
+        filtered_key_frame_indexes_for_original_frame_indexes = []
         # Repeat until number of frames 
         min_brightness_values = np.arange(config.ImageSelector.min_brightness_value, -0.01, -self.brightness_step)
         max_brightness_values = np.arange(config.ImageSelector.max_brightness_value, 100.01, self.brightness_step)
@@ -284,8 +290,8 @@ class ImageSelector(object):
             self.max_brightness_value = max_brightness_value
             self.min_entropy_value = min_entropy_value
             self.max_entropy_value = max_entropy_value
-            filtered_key_frames = self.__filter_optimum_brightness_and_contrast_images__(
-                input_key_frames, 
+            filtered_key_frames, filtered_key_frame_indexes_for_original_frame_indexes = self.__filter_optimum_brightness_and_contrast_images__(
+                input_key_frames
             )
             if len(filtered_key_frames) >= number_of_frames:
                 break
@@ -301,8 +307,11 @@ class ImageSelector(object):
             for index in selected_images_index:
                 img = filtered_key_frames[index]
                 filtered_images_list.append(img)
+                filtered_images_frame_index_list.append(filtered_key_frame_indexes_for_original_frame_indexes[index])
+
         else:
             # if number of required files are less than requested key-frames return all the files
             for img in filtered_key_frames:
                 filtered_images_list.append(img)
-        return filtered_images_list
+            filtered_images_frame_index_list = filtered_key_frame_indexes_for_original_frame_indexes
+        return filtered_images_list, filtered_images_frame_index_list

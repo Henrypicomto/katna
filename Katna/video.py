@@ -177,22 +177,29 @@ class Video(object):
         # Passing all the clipped videos for  the frame extraction using map function of the
         # multiprocessing pool
         with self.pool_extractor:
-            extracted_candidate_frames = self.pool_extractor.map(
+            extracted_frame_capsules = self.pool_extractor.map(
                 frame_extractor.extract_candidate_frames, chunked_videos
             )
+
+        extracted_candidate_frames = []
+        extracted_candidate_frame_indexes = []
+
+        for frameCapsule in extracted_frame_capsules:
+            extracted_candidate_frame_indexes.extend(frameCapsule[1])
+            extracted_candidate_frames.append(frameCapsule[0])
         # Converting the nested list of extracted frames into 1D list
         extracted_candidate_frames = functools.reduce(operator.iconcat, extracted_candidate_frames, [])
-
+        # print(f"extracted_frame_indexes -> {extracted_candidate_frame_indexes} has {len(extracted_candidate_frame_indexes)} frames!")
         self._remove_clips(chunked_videos)
         image_selector = ImageSelector(self.n_processes)
 
-        top_frames = image_selector.select_best_frames(
+        top_frames, top_frames_id = image_selector.select_best_frames(
             extracted_candidate_frames, no_of_frames
         )
-
+        print(f"top frames ids -> {top_frames_id} has {len(top_frames_id)} frames!")
         del extracted_candidate_frames
-
-        return top_frames
+        del extracted_candidate_frame_indexes
+        return top_frames, top_frames_id
 
     def _extract_keyframes_for_files_iterator(self, no_of_frames, list_of_filepaths):
         """Extract desirable number of keyframes for files in the list of filepaths.
@@ -208,10 +215,10 @@ class Video(object):
         for filepath in list_of_filepaths:
             print("Running for : ", filepath)
             try:
-                keyframes = self._extract_keyframes_from_video(no_of_frames, filepath)
-                yield {"keyframes": keyframes, "error": None,"filepath": filepath}
+                keyframes, key_frame_ids = self._extract_keyframes_from_video(no_of_frames, filepath)
+                yield {"keyframes": keyframes, "keyframeids": key_frame_ids, "error": None,"filepath": filepath}
             except Exception as e:
-                yield {"keyframes": [],"error": e,"filepath": filepath}
+                yield {"keyframes": [], "keyframeids": [], "error": e,"filepath": filepath}
 
     @FileDecorators.validate_dir_path
     def extract_keyframes_from_videos_dir(self, no_of_frames, dir_path, writer):
@@ -241,15 +248,15 @@ class Video(object):
 
         if len(valid_files) > 0:
             generator = self._extract_keyframes_for_files_iterator(no_of_frames, valid_files)
-
             for data in generator:
 
                 file_path = data["filepath"]
                 file_keyframes = data["keyframes"]
+                file_keyframe_ids = data["keyframeids"]
                 error = data["error"]
 
                 if error is None:
-                    writer.write(file_path, file_keyframes)
+                    writer.write_with_frame_id(file_path, file_keyframes, file_keyframe_ids)
                     print("Completed processing for : ", file_path)
                 else:
                     print("Error processing file : ", file_path)
@@ -273,12 +280,14 @@ class Video(object):
         print("Video split complete.")
 
         all_top_frames_split = []
+        all_top_frame_ids_split = []
 
         # call _extract_keyframes_from_video
         for split_video_file_path in video_splits:
             # print("Processing split : ", split_video_file_path)
-            top_frames_split = self._extract_keyframes_from_video(no_of_frames, split_video_file_path)
+            top_frames_split, top_frames_ids_split = self._extract_keyframes_from_video(no_of_frames, split_video_file_path)
             all_top_frames_split.append(top_frames_split)
+            all_top_frame_ids_split.append(top_frames_ids_split)
 
         # collect and merge keyframes to get no_of_frames
         self._remove_clips(video_splits)
@@ -288,11 +297,11 @@ class Video(object):
         extracted_candidate_frames = functools.reduce(operator.iconcat, all_top_frames_split, [])
 
         # top frames
-        top_frames = image_selector.select_best_frames(
+        top_frames, top_frame_ids = image_selector.select_best_frames(
             extracted_candidate_frames, no_of_frames
         )
 
-        return top_frames
+        return top_frames, top_frame_ids
 
     @FileDecorators.validate_file_path
     def extract_video_keyframes(self, no_of_frames, file_path, writer):
@@ -314,12 +323,13 @@ class Video(object):
         # duration is in seconds
         if video_duration > (config.Video.video_split_threshold_in_minutes * 60):
             print("Large Video (duration = %s min), will split into smaller videos " % round(video_duration / 60))
-            top_frames = self.extract_video_keyframes_big_video(no_of_frames, file_path)
+            top_frames, top_frames_ids = self.extract_video_keyframes_big_video(no_of_frames, file_path)
         else:
-            top_frames = self._extract_keyframes_from_video(no_of_frames, file_path)
+            top_frames, top_frames_ids = self._extract_keyframes_from_video(no_of_frames, file_path)
 
-        writer.write(file_path, top_frames)
+        writer.write_with_frame_id(file_path, top_frames, top_frames_ids)
         print("Completed processing for : ", file_path)
+        return top_frames_ids
 
     def _split_large_video(self, file_path):
         """
