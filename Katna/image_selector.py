@@ -93,7 +93,7 @@ class ImageSelector(object):
 
         return cv2.Laplacian(image, cv2.CV_64F).var()
 
-    def __filter_optimum_brightness_and_contrast_images__(self, input_img_files):
+    def __filter_optimum_brightness_and_contrast_images__(self, input_img_files, timestamp_files):
         """ Internal function for selection of given input images with following parameters :optimum brightness and contrast range ,
         returns array of image files which are in optimum brigtness and contrast/entropy range.
  
@@ -105,6 +105,8 @@ class ImageSelector(object):
         :rtype: python list of images 
         """
 
+        print("__filter_optimum_brightness_and_contrast_images__ len input_img_files", len(input_img_files))
+        print("__filter_optimum_brightness_and_contrast_images__ len timestamp_files", len(timestamp_files))
         n_files = len(input_img_files)
 
         # -------- calculating the brightness and entropy score by multiprocessing ------
@@ -139,6 +141,12 @@ class ImageSelector(object):
         )
 
         # Returning only those images which are have good brightness and contrast score
+        if timestamp_files is not None:
+            return [
+                (input_img_files[i], timestamp_files[i])
+                for i in range(n_files)
+                if brightness_ok[i] and contrast_ok[i]
+            ]
 
         return [
             input_img_files[i]
@@ -247,7 +255,7 @@ class ImageSelector(object):
     #     """
     #     self.__dict__.update(state)
 
-    def select_best_frames(self, input_key_frames, number_of_frames):
+    def select_best_frames(self, input_key_frames, key_frames_timestamps, number_of_frames):
         """[summary] Public function for Image selector class: takes list of key-frames images and number of required
         frames as input, returns list of filtered keyframes
 
@@ -261,10 +269,14 @@ class ImageSelector(object):
         :rtype: python list of images
         """
 
+        print("select_best_frames len input_key_frames", len(input_key_frames))
+        print("select_best_frames len key_frames_timestamps", len(key_frames_timestamps))
+
         self.nb_clusters = number_of_frames
 
         filtered_key_frames = []
         filtered_images_list = []
+        filtered_timestamps_list = []
         # Repeat until number of frames 
         min_brightness_values = np.arange(config.ImageSelector.min_brightness_value, -0.01, -self.brightness_step)
         max_brightness_values = np.arange(config.ImageSelector.max_brightness_value, 100.01, self.brightness_step)
@@ -284,9 +296,13 @@ class ImageSelector(object):
             self.max_brightness_value = max_brightness_value
             self.min_entropy_value = min_entropy_value
             self.max_entropy_value = max_entropy_value
-            filtered_key_frames = self.__filter_optimum_brightness_and_contrast_images__(
-                input_key_frames, 
+            filtered_key_frames_and_timestamps_tuple_list = self.__filter_optimum_brightness_and_contrast_images__(
+            #filtered_key_frames, filtered_timestamps = self.__filter_optimum_brightness_and_contrast_images__(
+                input_key_frames, key_frames_timestamps
             )
+
+            filtered_key_frames = [img for img, _ in filtered_key_frames_and_timestamps_tuple_list]
+            filtered_timestamps = [timestamp for _, timestamp in filtered_key_frames_and_timestamps_tuple_list]
             if len(filtered_key_frames) >= number_of_frames:
                 break
 
@@ -300,9 +316,14 @@ class ImageSelector(object):
 
             for index in selected_images_index:
                 img = filtered_key_frames[index]
+                timestamp = filtered_timestamps[index]
                 filtered_images_list.append(img)
+                filtered_timestamps_list.append(timestamp)
         else:
             # if number of required files are less than requested key-frames return all the files
             for img in filtered_key_frames:
                 filtered_images_list.append(img)
-        return filtered_images_list
+            for timestamp in filtered_timestamps:
+                filtered_timestamps_list.append(timestamp)
+
+        return filtered_images_list, filtered_timestamps_list

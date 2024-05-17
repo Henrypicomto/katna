@@ -45,7 +45,7 @@ class FrameExtractor(object):
             return count
         return None
 
-    def __process_frame(self, frame, prev_frame, frame_diffs, frames):
+    def __process_frame(self, frame, prev_frame, frame_diffs, frames, timestamp, timestamps):
         """Function to calculate the difference between current frame and previous frame
 
         :param frame: frame from the video
@@ -69,10 +69,47 @@ class FrameExtractor(object):
             #count, frame = frame_diff
             frame_diffs.append(frame_diff)
             frames.append(frame)
+            timestamps.append(timestamp)
         del prev_frame
         prev_frame = curr_frame
         
         return prev_frame, curr_frame
+
+    # def __extract_all_frames_from_video__(self, videopath):
+    #     """Generator function for extracting frames from a input video which are sufficiently different from each other, 
+    #     and return result back as list of opencv images in memory
+
+    #     :param videopath: inputvideo path
+    #     :type videopath: `str`
+    #     :return: Generator with extracted frames in max_process_frames chunks and difference between frames
+    #     :rtype: generator object with content of type [numpy.ndarray, numpy.ndarray] 
+    #     """
+    #     cap = cv2.VideoCapture(str(videopath))
+
+    #     ret, frame = cap.read()
+    #     i = 1
+    #     chunk_no = 0
+        
+    #     while ret:
+    #         curr_frame = None
+    #         prev_frame = None
+
+    #         frame_diffs = []
+    #         frames = []
+    #         for _ in range(0, self.max_frames_in_chunk):
+    #             if ret:
+    #                 # Calling process frame function to calculate the frame difference and adding the difference 
+    #                 # in **frame_diffs** list and frame to **frames** list
+    #                 prev_frame, curr_frame = self.__process_frame(frame, prev_frame, frame_diffs, frames)
+    #                 i = i + 1
+    #                 ret, frame = cap.read()
+    #                 # print(frame_count)
+    #             else:
+    #                 cap.release()
+    #                 break
+    #         chunk_no = chunk_no + 1
+    #         yield frames, frame_diffs
+    #     cap.release()
 
     def __extract_all_frames_from_video__(self, videopath):
         """Generator function for extracting frames from a input video which are sufficiently different from each other, 
@@ -95,11 +132,15 @@ class FrameExtractor(object):
 
             frame_diffs = []
             frames = []
+            timestamps = []  # List to store timestamps
             for _ in range(0, self.max_frames_in_chunk):
                 if ret:
+                    # Get the timestamp of the current frame
+                    timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
+
                     # Calling process frame function to calculate the frame difference and adding the difference 
                     # in **frame_diffs** list and frame to **frames** list
-                    prev_frame, curr_frame = self.__process_frame(frame, prev_frame, frame_diffs, frames)
+                    prev_frame, curr_frame = self.__process_frame(frame, prev_frame, frame_diffs, frames, timestamp, timestamps)
                     i = i + 1
                     ret, frame = cap.read()
                     # print(frame_count)
@@ -107,10 +148,17 @@ class FrameExtractor(object):
                     cap.release()
                     break
             chunk_no = chunk_no + 1
-            yield frames, frame_diffs
+
+            print("__extract_all_frames_from_video__ len of frames", len(frames))
+            print("__extract_all_frames_from_video__ len of timestamps", len(timestamps))
+
+
+            yield frames, frame_diffs, timestamps  # Yield timestamps along with frames and differences
         cap.release()
 
-    def __get_frames_in_local_maxima__(self, frames, frame_diffs):
+
+
+    def __get_frames_in_local_maxima__(self, frames, frame_diffs, timestamps):
         """ Internal function for getting local maxima of key frames 
         This functions Returns one single image with strongest change from its vicinity of frames 
         ( vicinity defined using window length ) 
@@ -124,6 +172,7 @@ class FrameExtractor(object):
 
         """
         extracted_key_frames = []
+        extracted_key_frames_timestamps = []
         diff_array = np.array(frame_diffs)
         # Normalizing the frame differences based on windows parameters
         sm_diff_array = self.__smooth__(diff_array, self.len_window)
@@ -133,11 +182,17 @@ class FrameExtractor(object):
 
         for frame_index in frame_indexes:
             extracted_key_frames.append(frames[frame_index - 1])
+            #!Added
+            extracted_key_frames_timestamps.append(timestamps[frame_index - 1])
         del frames[:]
         del sm_diff_array
         del diff_array
         del frame_diffs[:]
-        return extracted_key_frames
+
+        print("__get_frames_in_local_maxima__ len of extracted_key_frames", len(extracted_key_frames))
+        print("__get_frames_in_local_maxima__ len of extracted_key_frames_timestamps", len(extracted_key_frames_timestamps))
+
+        return extracted_key_frames, extracted_key_frames_timestamps
 
     def __smooth__(self, x, window_len, window=config.FrameExtractor.window_type):
         """smooth the data using a window with requested size.
@@ -200,6 +255,7 @@ class FrameExtractor(object):
         """
 
         extracted_candidate_key_frames = []
+        extracted_candidate_key_frames_timestamps = []
 
         # Get all frames from video in chunks using python Generators
         frame_extractor_from_video_generator = self.__extract_all_frames_from_video__(
@@ -208,16 +264,24 @@ class FrameExtractor(object):
 
         # Loop over every frame in the frame extractor generator object and calculate the
         # local maxima of frames 
-        for frames, frame_diffs in frame_extractor_from_video_generator:
+        for frames, frame_diffs, timestamps in frame_extractor_from_video_generator:
+
+            print("extract_candidate_frames len of frames", len(frames))
+            print("extract_candidate_frames len of timestamps", len(timestamps))
+
             extracted_candidate_key_frames_chunk = []
+            extracted_candidate_key_frames_chunk_timestamps = []
             if self.USE_LOCAL_MAXIMA:
 
                 # Getting the frame with maximum frame difference
-                extracted_candidate_key_frames_chunk = self.__get_frames_in_local_maxima__(
-                    frames, frame_diffs
+                extracted_candidate_key_frames_chunk, extracted_candidate_key_frames_chunk_timestamps = self.__get_frames_in_local_maxima__(
+                    frames, frame_diffs, timestamps
                 )
                 extracted_candidate_key_frames.extend(
                     extracted_candidate_key_frames_chunk
                 )
+                extracted_candidate_key_frames_timestamps.extend(
+                    extracted_candidate_key_frames_chunk_timestamps
+                )
 
-        return extracted_candidate_key_frames
+        return extracted_candidate_key_frames, extracted_candidate_key_frames_timestamps

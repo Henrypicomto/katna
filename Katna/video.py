@@ -30,6 +30,7 @@ from imageio_ffmpeg import get_ffmpeg_exe
 from multiprocessing import Pool, Process, cpu_count
 import functools
 import operator
+import csv
 
 
 class Video(object):
@@ -176,23 +177,35 @@ class Video(object):
 
         # Passing all the clipped videos for  the frame extraction using map function of the
         # multiprocessing pool
+        # with self.pool_extractor:
+        #     extracted_candidate_frames, extracted_candidate_frames_timestamps = self.pool_extractor.map(
+        #         frame_extractor.extract_candidate_frames, chunked_videos
+        #     )
+
         with self.pool_extractor:
-            extracted_candidate_frames = self.pool_extractor.map(
+            extracted_candidate_frames_and_timestamps = self.pool_extractor.map(
                 frame_extractor.extract_candidate_frames, chunked_videos
             )
+        extracted_candidate_frames, extracted_candidate_frames_timestamps = zip(*extracted_candidate_frames_and_timestamps)
+
+        print("_extract_keyframes_from_video length of extracted_candidate_frames: ", len(extracted_candidate_frames)
+                , "_extract_keyframes_from_video length of extracted_candidate_frames_timestamps: ", len(extracted_candidate_frames_timestamps))
+
+        print("_extract_keyframes_from_video extracted_candidate_frames_timestamps: ", extracted_candidate_frames_timestamps)
         # Converting the nested list of extracted frames into 1D list
         extracted_candidate_frames = functools.reduce(operator.iconcat, extracted_candidate_frames, [])
+        extracted_candidate_frames_timestamps = functools.reduce(operator.iconcat, extracted_candidate_frames_timestamps, [])
 
         self._remove_clips(chunked_videos)
         image_selector = ImageSelector(self.n_processes)
 
-        top_frames = image_selector.select_best_frames(
-            extracted_candidate_frames, no_of_frames
+        top_frames, top_frames_timestamps = image_selector.select_best_frames(
+            extracted_candidate_frames, extracted_candidate_frames_timestamps, no_of_frames
         )
 
         del extracted_candidate_frames
 
-        return top_frames
+        return top_frames, top_frames_timestamps
 
     def _extract_keyframes_for_files_iterator(self, no_of_frames, list_of_filepaths):
         """Extract desirable number of keyframes for files in the list of filepaths.
@@ -316,9 +329,29 @@ class Video(object):
             print("Large Video (duration = %s min), will split into smaller videos " % round(video_duration / 60))
             top_frames = self.extract_video_keyframes_big_video(no_of_frames, file_path)
         else:
-            top_frames = self._extract_keyframes_from_video(no_of_frames, file_path)
+            top_frames, top_timestamps = self._extract_keyframes_from_video(no_of_frames, file_path)
+
 
         writer.write(file_path, top_frames)
+
+        def write_timestamps_to_csv(file_path, top_timestamps):
+            """Write the top_timestamps to a CSV file.
+
+            :param file_path: The path of the CSV file.
+            :type file_path: str
+            :param top_timestamps: The list of top timestamps.
+            :type top_timestamps: list
+            """
+            with open(file_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Index', 'Timestamp'])
+                for i, timestamp in enumerate(top_timestamps):
+                    writer.writerow([i, timestamp])
+
+        # Call the function to write the timestamps to a CSV file
+        csv_dir = os.path.join(os.path.dirname(os.path.dirname(file_path)), "keyframes", os.path.basename(file_path).split(".")[0])
+        csv_file_path = os.path.join(csv_dir, 'timestamps.csv')
+        write_timestamps_to_csv(csv_file_path, top_timestamps)
         print("Completed processing for : ", file_path)
 
     def _split_large_video(self, file_path):
